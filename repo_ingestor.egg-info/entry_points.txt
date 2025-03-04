@@ -1,2 +1,0 @@
-[console_scripts]
-repo-ingestor = repo_ingestor.cli:main
