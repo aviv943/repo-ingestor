@@ -6,7 +6,7 @@ from pathlib import Path
 
 from repo_ingestor.formatters import (
     BaseFormatter,
-    JSONFormatter,
+    JSONSummaryFormatter,
     MarkdownFormatter,
     TextFormatter,
     FORMATTERS
@@ -89,35 +89,6 @@ class TestFormatters(unittest.TestCase):
             }
         )
 
-    def test_json_formatter(self):
-        # Create a formatter
-        formatter = JSONFormatter()
-
-        # Create a buffer to write the output
-        output = io.StringIO()
-
-        # Format the repository info
-        formatter.format(self.repo_info, output)
-
-        # Get the output and parse it as JSON
-        output_str = output.getvalue()
-        output_json = json.loads(output_str)
-
-        # Verify output structure
-        self.assertIn("languages", output_json)
-        self.assertIn("file_count", output_json)
-        self.assertIn("metadata", output_json)
-        self.assertIn("tree_structure", output_json)
-        self.assertIn("files", output_json)
-        self.assertIn("dependencies", output_json)
-        self.assertIn("token_info", output_json)
-        self.assertIn("function_info", output_json)
-
-        # Verify some content
-        self.assertEqual(output_json["languages"], ["python", "csharp"])
-        self.assertEqual(output_json["file_count"], 3)
-        self.assertEqual(len(output_json["files"]), 3)
-
     def test_markdown_formatter(self):
         # Create a formatter
         formatter = MarkdownFormatter()
@@ -183,7 +154,6 @@ class TestFormatters(unittest.TestCase):
         self.assertIn("text", FORMATTERS)
 
         # Verify formatter classes
-        self.assertEqual(FORMATTERS["json"], JSONFormatter)
         self.assertEqual(FORMATTERS["markdown"], MarkdownFormatter)
         self.assertEqual(FORMATTERS["text"], TextFormatter)
 

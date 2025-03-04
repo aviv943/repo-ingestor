@@ -29,26 +29,54 @@ def is_binary_file(file_path: Path) -> bool:
 def matches_any_pattern(path: str, patterns: Set[str]) -> bool:
     """
     Check if a path matches any of the given patterns.
-    Normalizes path separators to handle both Windows and Unix paths.
+
+    Args:
+        path: The path to check
+        patterns: Set of patterns to match against
+
+    Returns:
+        True if the path matches any pattern, False otherwise
     """
-    # Normalize path separators to forward slashes for pattern matching
+    # Normalize path to use forward slashes for consistent matching
     normalized_path = path.replace('\\', '/')
 
+    # Also create a version without leading dot for matching paths that might appear differently
+    no_dot_path = normalized_path
+    if normalized_path.startswith('./'):
+        no_dot_path = normalized_path[2:]
+
     for pattern in patterns:
-        # Check if it's a directory pattern (ending with /)
+        pattern = pattern.replace('\\', '/')
+
+        # Handle directory exclusions - match if pattern is a directory prefix
         if pattern.endswith('/'):
-            # Remove the trailing slash for matching
             dir_pattern = pattern[:-1]
-            # Match either exact directory or any file/dir under it
-            if fnmatch.fnmatch(normalized_path, dir_pattern) or fnmatch.fnmatch(normalized_path, f"{dir_pattern}/*"):
+            if (normalized_path.startswith(dir_pattern + '/') or
+                    normalized_path == dir_pattern or
+                    no_dot_path.startswith(dir_pattern + '/') or
+                    no_dot_path == dir_pattern):
                 return True
 
-        # Regular pattern matching
+        # Handle dot-prefixed directories - match with or without the dot
+        if pattern.startswith('.'):
+            no_dot_pattern = pattern[1:]
+            if (fnmatch.fnmatch(normalized_path, no_dot_pattern) or
+                    fnmatch.fnmatch(normalized_path, '*/' + no_dot_pattern) or
+                    fnmatch.fnmatch(normalized_path, no_dot_pattern + '/*')):
+                return True
+
+        # Standard pattern matching
         if fnmatch.fnmatch(normalized_path, pattern):
             return True
 
-    return False
+        # Also try matching against parts of the path for directory-based patterns
+        path_parts = normalized_path.split('/')
+        for i in range(len(path_parts)):
+            partial_path = '/'.join(path_parts[i:])
+            if fnmatch.fnmatch(partial_path, pattern):
+                return True
 
+    return False
 
 def find_files(
         root_dir: Path,

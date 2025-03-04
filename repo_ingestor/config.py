@@ -1,19 +1,15 @@
-"""
-Configuration settings for the repository ingestor.
-"""
+import os
 from dataclasses import dataclass, field
 from typing import Dict, List, Set
 
-
 @dataclass
 class LanguageConfig:
-    """Configuration for a specific language."""
+    """Configuration for a specific programming language or file format."""
     name: str
     extensions: Set[str] = field(default_factory=set)
     include_patterns: Set[str] = field(default_factory=set)
     exclude_patterns: Set[str] = field(default_factory=set)
     config_files: Set[str] = field(default_factory=set)
-
 
 @dataclass
 class Config:
@@ -34,12 +30,14 @@ class Config:
     common_exclude_patterns: Set[str] = field(default_factory=lambda: {
         # Git
         ".git/",
+
         # Python
         "__pycache__/",
         "*.pyc",
         "*.pyd",
         "*.pyo",
-        # Binary and compiled files
+
+        # Compiled binaries
         "*.dll",
         "*.exe",
         "*.obj",
@@ -48,7 +46,8 @@ class Config:
         "*.lib",
         "*.so",
         "*.dylib",
-        # Visual Studio/C# files
+
+        # Visual Studio and other IDEs
         "*.ncb",
         "*.sdf",
         "*.suo",
@@ -73,20 +72,24 @@ class Config:
         "*.psess",
         "*.vsp",
         "*.vspx",
-        # Build output folders
+
+        # Build directories
         "**/bin/",
         "**/obj/",
         "**/build/",
         "**/dist/",
-        # NPM
+
+        # Node.js
         "**/node_modules/",
-        # Virtual environments
+
+        # Python virtual environments
         "**/.venv/",
         "**/venv/",
         "**/env/",
         "**/.env/",
         "**/ENV/",
-        # Other
+
+        # Misc
         "**/.DS_Store",
         "**/Lib/site-packages/"
     })
@@ -98,11 +101,10 @@ class Config:
     remove_comments: bool = True
 
     def __post_init__(self):
-        # Normalize all patterns to use forward slashes
+        # Normalize path separators in patterns
         self.common_include_patterns = {p.replace('\\', '/') for p in self.common_include_patterns}
         self.common_exclude_patterns = {p.replace('\\', '/') for p in self.common_exclude_patterns}
 
-        # Ensure directory patterns end with a slash for proper matching
         normalized_exclude = set()
         for pattern in self.common_exclude_patterns:
             if pattern.endswith('/'):
@@ -110,7 +112,8 @@ class Config:
             elif pattern.endswith('/**'):
                 normalized_exclude.add(pattern[:-3] + '/')
             elif '**/' in pattern and not pattern.endswith('*'):
-                # For patterns like **/obj, ensure they become **/obj/
+                # If pattern has a globstar but doesn't end with a wildcard,
+                # add a trailing slash to also match directories
                 if not any(c in pattern.split('**/')[1] for c in '.*?[]'):
                     normalized_exclude.add(pattern + '/')
                 else:
@@ -120,6 +123,7 @@ class Config:
 
         self.common_exclude_patterns = normalized_exclude
 
+        # Configure Python language
         self.languages["python"] = LanguageConfig(
             name="Python",
             extensions={".py"},
@@ -128,6 +132,7 @@ class Config:
             config_files={"pyproject.toml", "setup.py", "setup.cfg", "requirements.txt"}
         )
 
+        # Configure C# language
         self.languages["csharp"] = LanguageConfig(
             name="C#",
             extensions={".cs", ".csproj", ".sln"},
@@ -136,6 +141,7 @@ class Config:
             config_files={"*.csproj", "*.sln", "packages.config", "NuGet.config"}
         )
 
+        # Configure React language
         self.languages["react"] = LanguageConfig(
             name="React",
             extensions={".jsx", ".tsx", ".js", ".ts"},
@@ -144,6 +150,52 @@ class Config:
             config_files={"package.json", "tsconfig.json", ".babelrc", "webpack.config.js"}
         )
 
+        # Configure YAML language
+        self.languages["yaml"] = LanguageConfig(
+            name="YAML",
+            extensions={".yml", ".yaml"},
+            include_patterns={
+                "docker-compose*.yml", "docker-compose*.yaml",
+                ".github/workflows/*.yml", ".github/workflows/*.yaml",
+                "kubernetes/*.yml", "kubernetes/*.yaml",
+                "k8s/*.yml", "k8s/*.yaml",
+                "helm/**/*.yml", "helm/**/*.yaml",
+                ".gitlab-ci.yml", "cloudbuild.yaml",
+                "appveyor.yml", "circle.yml", "travis.yml", ".travis.yml",
+                "**/Chart.yaml", "**/values.yaml",
+                "ansible/*.yml", "ansible/*.yaml",
+                "*.yaml", "*.yml"  # Include all YAML files as a fallback
+            },
+            exclude_patterns=set(),
+            config_files={"docker-compose.yml", "docker-compose.yaml", ".github/workflows/*.yml"}
+        )
 
-# Default configuration
+    def add_exclude_pattern(self, pattern: str) -> None:
+        """
+        Add an exclude pattern, ensuring it's properly formatted for matching.
+
+        Args:
+            pattern: The pattern to add
+        """
+        # Normalize separator to forward slash
+        pattern = pattern.replace('\\', '/')
+
+        # Ensure directory patterns end with a slash
+        if os.path.isdir(pattern) and not pattern.endswith('/'):
+            pattern += '/'
+
+        # Add both with and without leading dot for flexibility
+        self.common_exclude_patterns.add(pattern)
+
+        # If pattern starts with dot, add version without dot
+        if pattern.startswith('.'):
+            self.common_exclude_patterns.add(pattern[1:])
+
+        # If pattern doesn't end with slash or wildcard, add wildcard version
+        if not pattern.endswith('/') and not pattern.endswith('*'):
+            if os.path.isdir(pattern):
+                self.common_exclude_patterns.add(pattern + '**/*')
+            else:
+                self.common_exclude_patterns.add(pattern + '*')
+
 DEFAULT_CONFIG = Config()

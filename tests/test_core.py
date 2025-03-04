@@ -5,6 +5,7 @@ from pathlib import Path
 
 from repo_ingestor.core import RepositoryInfo, RepositoryIngestor
 from repo_ingestor.config import Config
+from repo_ingestor.utils import matches_any_pattern
 
 from tests.fixtures import create_sample_repo, cleanup_sample_repo
 
@@ -174,6 +175,68 @@ class TestRepositoryIngestor(unittest.TestCase):
         # Clean up
         cleanup_sample_repo(repo_path)
 
+    def test_language_filtering(self):
+        """
+        Test filtering by specific languages
+        """
+        repo_path = create_sample_repo()
+
+        try:
+            # First analyze with all languages to confirm what's available
+            all_langs_repo_info = self.ingestor.ingest(repo_path)
+
+            # Verify all languages are detected
+            self.assertIn("python", all_langs_repo_info.languages)
+            self.assertIn("csharp", all_langs_repo_info.languages)
+            self.assertIn("react", all_langs_repo_info.languages)
+            self.assertIn("yaml", all_langs_repo_info.languages)
+
+            # Get the full list of files to verify against later
+            all_files = set(all_langs_repo_info.files.keys())
+
+            # Get all YAML files to check against later
+            all_yaml_files = {f for f in all_files if f.endswith('.yml') or f.endswith('.yaml')}
+
+            # Test 1: Python-only filter
+            python_repo_info = self.ingestor.ingest(repo_path, languages_filter=["python"])
+
+            # Verify language detection works
+            self.assertEqual(python_repo_info.languages, ["python"])
+
+            # Get Python-only files
+            python_files = set(python_repo_info.files.keys())
+
+            # Debug output for understanding what files were included
+            print("\nAll files:", all_files)
+            print("Python filtered files:", python_files)
+
+            # Ensure no YAML files were included
+            python_yaml_files = {f for f in python_files if f.endswith('.yml') or f.endswith('.yaml')}
+            self.assertEqual(python_yaml_files, set(),
+                             f"YAML files found in Python-only analysis: {python_yaml_files}")
+
+            # Test 2: Filter Python + YAML
+            py_yaml_repo_info = self.ingestor.ingest(repo_path, languages_filter=["python", "yaml"])
+
+            # Verify language detection
+            self.assertSetEqual(set(py_yaml_repo_info.languages), {"python", "yaml"})
+
+            # Get Python+YAML files
+            py_yaml_files = set(py_yaml_repo_info.files.keys())
+
+            # Ensure YAML files are now included
+            self.assertTrue(all_yaml_files.issubset(py_yaml_files),
+                            f"Not all YAML files included. Expected {all_yaml_files}, got intersection: {all_yaml_files.intersection(py_yaml_files)}")
+
+            # Test 3: Case insensitivity
+            upper_repo_info = self.ingestor.ingest(repo_path, languages_filter=["PYTHON", "YAML"])
+
+            # Verify languages are detected correctly despite case differences
+            self.assertSetEqual(set(upper_repo_info.languages), {"python", "yaml"})
+
+        finally:
+            # Clean up
+            cleanup_sample_repo(repo_path)
 
 if __name__ == "__main__":
     unittest.main()

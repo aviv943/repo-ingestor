@@ -6,7 +6,7 @@ import time
 
 from .config import Config, DEFAULT_CONFIG
 from .language_handlers import LANGUAGE_HANDLERS
-from .utils import find_files, get_file_content, remove_comments_from_content
+from .utils import find_files, get_file_content, remove_comments_from_content, matches_any_pattern
 from .token_utils import estimate_repository_tokens
 from .function_analyzer import build_call_graph_from_files, analyze_non_python_functions
 
@@ -62,18 +62,19 @@ class RepositoryIngestor:
 
     def _collect_files(self, repo_path: Path, languages: List[str]) -> Dict[str, str]:
         """
-        Collect and read all relevant files from the repository.
+        Collect files for the specified languages from the repository
 
         Args:
             repo_path: Path to the repository
-            languages: List of languages to consider
+            languages: List of languages to collect files for
 
         Returns:
-            Dictionary mapping relative file paths to their content
+            Dictionary mapping file paths to file contents
         """
         include_patterns = set(self.config.common_include_patterns)
         exclude_patterns = set(self.config.common_exclude_patterns)
 
+        # Only add language-specific patterns for the languages that are being analyzed
         for lang in languages:
             if lang in self.handlers:
                 include_patterns.update(self.handlers[lang].get_include_patterns())
@@ -86,7 +87,8 @@ class RepositoryIngestor:
             repo_path,
             include_patterns,
             exclude_patterns,
-            self.config.max_file_size_kb
+            self.config.max_file_size_kb,
+            self.config.max_depth
         )
 
         if self.progress:
@@ -95,6 +97,33 @@ class RepositoryIngestor:
 
         files = {}
         for file_path, relative_path in file_paths:
+            # Check if the file should be included based on language
+            should_include = False
+
+            # If no languages filter specified, include all matched files
+            if not languages:
+                should_include = True
+            else:
+                # If the file matches a language-specific pattern, include it
+                for lang in languages:
+                    if lang in self.handlers:
+                        lang_patterns = self.handlers[lang].get_include_patterns()
+                        if any(matches_any_pattern(relative_path, {pattern}) for pattern in lang_patterns):
+                            should_include = True
+                            break
+
+                # Still include files that match common include patterns like README.md
+                # only if they explicitly match (not via wildcard)
+                if not should_include:
+                    explicit_common_patterns = {p for p in self.config.common_include_patterns
+                                                if '*' not in p and '?' not in p}
+                    if any(p == relative_path for p in explicit_common_patterns):
+                        should_include = True
+
+            # Skip files that don't match any language pattern
+            if not should_include:
+                continue
+
             content = get_file_content(file_path)
 
             if self.config.remove_comments:
@@ -249,30 +278,91 @@ class RepositoryIngestor:
 
         return function_info
 
-    def ingest(self, repo_path: str, token_estimate_only: bool = False) -> RepositoryInfo:
+    def ingest(self, repo_path: str, token_estimate_only: bool = False, languages_filter: List[str] = None) -> RepositoryInfo:
         """
-        Analyze the complete repository and return structured information.
+        Ingest a repository and analyze its contents
 
         Args:
-            repo_path: Path to the repository directory
+            repo_path: Path to the repository
+            token_estimate_only: If True, only estimate tokens without full analysis
+            languages_filter: List of language names to include (case-insensitive)
 
         Returns:
-            RepositoryInfo object with complete analysis
+            RepositoryInfo object containing analysis results
         """
         repo_path = Path(repo_path).resolve()
 
-        # Create a main task if using progress tracking
         if self.progress:
             self.task_id = self.progress.add_task("Analyzing repository...", total=100)
 
-        languages = self._detect_languages(repo_path)
-        files = self._collect_files(repo_path, languages)
+        # Detect all available languages in the repository
+        all_languages = self._detect_languages(repo_path)
+
+        # Apply language filter if specified
+        if languages_filter and all_languages:
+            # Convert filters to lowercase for case-insensitive matching
+            languages_filter_lower = [lang.lower() for lang in languages_filter]
+            filtered_languages = [lang for lang in all_languages if lang.lower() in languages_filter_lower]
+            languages = filtered_languages
+
+            if self.progress and filtered_languages:
+                self.progress.update(
+                    self.task_id,
+                    description=f"Analyzing {', '.join(filtered_languages)} files...",
+                    advance=2
+                )
+            elif self.progress:
+                self.progress.update(
+                    self.task_id,
+                    description="No matching languages found with specified filter!",
+                    advance=2
+                )
+        else:
+            languages = all_languages
+
+        # Collect all files first
+        files = self._collect_files(repo_path, all_languages)
+
+        # If we have language filters, filter the files by extension
+        if languages_filter and languages:
+            filtered_files = {}
+
+            # Get allowed extensions and config files for the filtered languages
+            allowed_extensions = set()
+            allowed_config_files = set()
+
+            # Build whitelists from language configurations
+            for lang in languages:
+                if lang in self.config.languages:
+                    lang_config = self.config.languages[lang]
+                    allowed_extensions.update(lang_config.extensions)
+                    allowed_config_files.update(lang_config.config_files)
+
+            # Always allow certain core files like README
+            allowed_core_files = {"README.md", "LICENSE"}
+
+            # Filter the files
+            for file_path, content in files.items():
+                file_ext = os.path.splitext(file_path)[1].lower()
+                file_name = os.path.basename(file_path)
+
+                # Include if it's a core file
+                if file_path in allowed_core_files or file_name in allowed_core_files:
+                    filtered_files[file_path] = content
+                # Include if it matches an allowed extension
+                elif file_ext in allowed_extensions:
+                    filtered_files[file_path] = content
+                # Include if it matches an allowed config file pattern
+                elif any(matches_any_pattern(file_path, {pattern}) for pattern in allowed_config_files):
+                    filtered_files[file_path] = content
+
+            # Replace the original files dictionary with the filtered one
+            files = filtered_files
 
         if token_estimate_only:
             if self.progress:
                 self.progress.update(self.task_id, description="Estimating tokens...", advance=90)
 
-            # Create minimal repo info for token estimation
             dummy_tree = self._build_tree_structure(files)
             token_info = self._analyze_tokens(files, {"languages": languages}, dummy_tree, {})
 
@@ -298,13 +388,11 @@ class RepositoryIngestor:
         token_info = self._analyze_tokens(files, metadata, tree, dependencies)
         function_info = self._analyze_functions(files)
 
-        # Complete the progress bar
         if self.progress:
             self.progress.update(self.task_id,
                                  description="Analysis complete!",
                                  completed=100)
 
-        # Return the complete repository information
         return RepositoryInfo(
             root_path=repo_path,
             languages=languages,

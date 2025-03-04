@@ -175,7 +175,7 @@ def format_help_custom(ctx, formatter):
     "-f", "--format",
     type=click.Choice(list(FORMATTERS.keys())),
     default="markdown",
-    help="Output format for the analysis report. Options: markdown (default), json (summary only), text"
+    help="Output format for the analysis report. Options: markdown (default), json, text"
 )
 @click.option(
     "--max-file-size",
@@ -186,15 +186,22 @@ def format_help_custom(ctx, formatter):
 @click.option(
     "--exclude",
     multiple=True,
-    help="Additional file patterns to exclude from analysis. Can be used multiple times. Example: --exclude \"*.log\" --exclude \"temp/*\""
+    help="Additional file patterns to exclude from analysis. Can be used multiple times. For directories, add a trailing slash. Example: --exclude \"*.log\" --exclude \"temp/\" --exclude \".blueprints/\""
+)
+@click.option(
+    "--languages",
+    multiple=True,
+    help="Filter by language(s). Only analyze specified languages. Can be used multiple times. Example: --languages python --languages yaml"
 )
 @click.option(
     "--keep-comments",
+    is_flag=True,
     default=False,
     help="Whether to preserve comments in output code. Default: False"
 )
 @click.option(
     "--minimal",
+    is_flag=True,
     default=False,
     help="Use minimal output mode with less verbose console output. Useful for automated environments. Default: False"
 )
@@ -216,9 +223,9 @@ def format_help_custom(ctx, formatter):
     default=False,
     help="Exclude test files and directories from analysis. This will exclude common test patterns across languages."
 )
-def main(repo_path, output, format, max_file_size, exclude, keep_comments, minimal, depth, token_estimate_only, no_tests):
+def main(repo_path, output, format, max_file_size, exclude, languages, keep_comments, minimal, depth, token_estimate_only, no_tests):
     """
-    Analyze a code repository and produce a comprehensive single-file output.
+    Process a code repository and generate a comprehensive analysis document.
 
     If REPO_PATH is not specified, the current directory will be used.
     """
@@ -241,7 +248,7 @@ def main(repo_path, output, format, max_file_size, exclude, keep_comments, minim
 
         if exclude:
             for pattern in exclude:
-                config.common_exclude_patterns.add(pattern)
+                config.add_exclude_pattern(pattern)
 
         # Add test exclusion patterns if --no-tests flag is set
         if no_tests:
@@ -278,7 +285,16 @@ def main(repo_path, output, format, max_file_size, exclude, keep_comments, minim
             ingestor = RepositoryIngestor(config, progress if not minimal else None)
 
             task = progress.add_task("Analyzing repository...", total=100)
-            repo_info = ingestor.ingest(repo_path, token_estimate_only=token_estimate_only)
+
+            # Convert languages to lowercase for case-insensitive matching
+            languages_filter = [lang.lower() for lang in languages] if languages else None
+
+            repo_info = ingestor.ingest(
+                repo_path,
+                token_estimate_only=token_estimate_only,
+                languages_filter=languages_filter
+            )
+
             progress.update(task, completed=100)
 
         if output is None:
