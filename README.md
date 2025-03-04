@@ -18,14 +18,7 @@ A professional tool that converts code repositories into a single file containin
 ## 📋 Installation
 
 ```bash
-# Clone the repository
-git clone https://github.com/yourusername/repo-ingestor.git
-cd repo-ingestor
-
-# Install the package
-pip install -e .
-
-# Or install directly from PyPI
+# Install directly from PyPI
 pip install repo-ingestor
 ```
 
